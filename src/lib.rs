@@ -56,19 +56,38 @@ mod user_input_processing {
 }
 
 mod query_currency_api {
+    use chrono::{Duration, Utc};
     use std::env;
 
     pub fn get_exchange_rate(cur1: String, cur2: String) {
         let api_key =
             env::var("CURRENCY_API_KEY").expect("CURRENCY_API_KEY environment variable not set");
-        let url = format!(
+
+        let yesterday = Utc::now() - Duration::days(1);
+
+        let url_today = format!(
             "https://free.currconv.com/api/v7/convert?q={}_{}&compact=ultra&apiKey={}",
             cur1, cur2, api_key
         );
 
+        let url_yesterday = format!(
+            "https://free.currconv.com/api/v7/convert?q={}_{}&compact=ultra&date={}&apiKey={}",
+            cur1,
+            cur2,
+            yesterday.format("%Y-%m-%e"),
+            api_key,
+        );
+
         // TODO change unwrap to at least expect
-        let resp = reqwest::blocking::get(url).unwrap().text().unwrap();
-        println!("{:#?}", resp);
+        let resp_today = reqwest::blocking::get(url_today).unwrap().text().unwrap();
+        println!("{:#?}", resp_today);
+
+        // TODO change unwrap to at least expect
+        let resp_yesterday = reqwest::blocking::get(url_yesterday)
+            .unwrap()
+            .text()
+            .unwrap();
+        println!("{:#?}", resp_yesterday);
     }
 }
 
