@@ -21,7 +21,7 @@ mod user_input_processing {
             .read_line(&mut input)
             .expect("Couldn't read line");
 
-        input.trim().to_uppercase().to_string()
+        input.trim().to_uppercase()
     }
 
     fn is_input_in_valid_format(user_input: String) -> Option<(String, String)> {
@@ -32,8 +32,8 @@ mod user_input_processing {
         Some((captures["cur1"].to_string(), captures["cur2"].to_string()))
     }
 
-    /// A wrapper function around the above get_user_input() and
-    /// dissect_user_input() functions. Guaranteed to return a valid
+    /// A wrapper function around the above `get_user_input`() and
+    /// `dissect_user_input`() functions. Guaranteed to return a valid
     /// currency pair (if one of the functions it calls doesn't panic).
     pub fn get_valid_currency_codes() -> (String, String) {
         let currency_vector = crate::construct_currency_vector();
@@ -57,9 +57,9 @@ mod user_input_processing {
 
 mod query_currency_api {
     use chrono::{Duration, Utc};
-    use std::env;
+    use std::{env, error::Error};
 
-    pub fn get_exchange_rate(cur1: String, cur2: String) {
+    pub fn get_exchange_rate(cur1: String, cur2: String) -> Result<(String, String), Box<dyn Error>>{
         let api_key =
             env::var("CURRENCY_API_KEY").expect("CURRENCY_API_KEY environment variable not set");
 
@@ -78,20 +78,18 @@ mod query_currency_api {
             api_key,
         );
 
-        // TODO change unwrap to at least expect
-        let resp_today = reqwest::blocking::get(url_today).unwrap().text().unwrap();
-        println!("{:#?}", resp_today);
+        let resp_today = reqwest::blocking::get(url_today)?.text()?;
+        // println!("{:#?}", resp_today);
 
-        // TODO change unwrap to at least expect
-        let resp_yesterday = reqwest::blocking::get(url_yesterday)
-            .unwrap()
-            .text()
-            .unwrap();
-        println!("{:#?}", resp_yesterday);
+        let resp_yesterday = reqwest::blocking::get(url_yesterday)?.text()?;
+        // println!("{:#?}", resp_yesterday);
+
+        return Ok((resp_today, resp_yesterday))
     }
 }
 
 pub fn run_app() {
-    let (cur1, cur2) = user_input_processing::get_valid_currency_codes();
-    query_currency_api::get_exchange_rate(cur1, cur2);
+    // let (cur1, cur2) = user_input_processing::get_valid_currency_codes();
+    // query_currency_api::get_exchange_rate(cur1, cur2);
+    query_currency_api::get_exchange_rate("USD".to_string(), "CHF".to_string());
 }
