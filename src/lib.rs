@@ -1,7 +1,5 @@
 use colored::Colorize;
-use serde_json::{self, Value};
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
@@ -59,7 +57,9 @@ mod user_input_processing {
     }
 }
 
-mod query_currency_api {
+mod price_operations {
+    use serde_json::{self, Value};
+    use std::collections::HashMap;
     use std::{env, error::Error};
 
     // Returns raw response from the API
@@ -86,6 +86,33 @@ mod query_currency_api {
 
         return Ok((resp_today, resp_yesterday));
     }
+
+    // TODO don't unwrap
+    pub fn get_prices_from_api_response(
+        exchange_rates_raw: (String, String),
+        yesterday_date: &str,
+    ) -> (f32, f32) {
+        // Convert the raw strings into hashmaps
+        let today_price_map: HashMap<String, Value> =
+            serde_json::from_str(&exchange_rates_raw.0).expect("JSON was not well-formatted");
+        let yesterday_price_map: HashMap<String, Value> =
+            serde_json::from_str(&exchange_rates_raw.1).expect("JSON was not well-formatted");
+
+        // Get the numerical values of the exchange rates
+        let today_price = today_price_map.get("USD_CHF").unwrap().to_string();
+        let yesterday_price = yesterday_price_map
+            .get("USD_CHF")
+            .unwrap()
+            .get(yesterday_date)
+            .unwrap()
+            .to_string();
+
+        // Convert the string values to floats
+        let today_price = today_price.parse::<f32>().unwrap();
+        let yesterday_price = yesterday_price.parse::<f32>().unwrap();
+
+        (today_price, yesterday_price)
+    }
 }
 
 // TODO this should return box dyn error.
@@ -94,37 +121,22 @@ pub fn run_app() {
     // let (cur1, cur2) = user_input_processing::get_valid_currency_codes();
     // query_currency_api::get_exchange_rate(cur1, cur2);
 
+    // Get yesterday's date
     let yesterday = chrono::Utc::now() - chrono::Duration::days(1);
     let yesterday_formatted = yesterday.format("%Y-%m-%e").to_string();
 
     // TODO don't unwrap
-    let exchange_rates_raw = query_currency_api::get_exchange_rate_raw(
+    let exchange_rates_raw = price_operations::get_exchange_rate_raw(
         "USD".to_string(),
         "CHF".to_string(),
         &yesterday_formatted,
     )
     .unwrap();
 
-    // Convert the raw strings into hashmaps
-    let today_price_map: HashMap<String, Value> =
-        serde_json::from_str(&exchange_rates_raw.0).expect("JSON was not well-formatted");
-    let yesterday_price_map: HashMap<String, Value> =
-        serde_json::from_str(&exchange_rates_raw.1).expect("JSON was not well-formatted");
+    let (today_price, yesterday_price) =
+        price_operations::get_prices_from_api_response(exchange_rates_raw, &yesterday_formatted);
 
-    // Get the numerical values of the exchange rates
-    let today_price = today_price_map.get("USD_CHF").unwrap().to_string();
-    let yesterday_price = yesterday_price_map
-        .get("USD_CHF")
-        .unwrap()
-        .get(&yesterday_formatted)
-        .unwrap()
-        .to_string();
-
-    println!("tooday: {} .. ystdy: {}", today_price, yesterday_price);
-
-    // Convert the string values to floats
-    let today_price = today_price.parse::<f32>().unwrap();
-    let yesterday_price = yesterday_price.parse::<f32>().unwrap();
+    println!("today: {} .. yesterday: {}", today_price, yesterday_price);
 
     // Compare today's price against yesterday price, print colored output accordingly
     match today_price.partial_cmp(&yesterday_price) {
