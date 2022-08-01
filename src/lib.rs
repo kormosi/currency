@@ -1,3 +1,7 @@
+use colored::Colorize;
+use serde_json::{self, Value};
+use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
@@ -56,14 +60,16 @@ mod user_input_processing {
 }
 
 mod query_currency_api {
-    use chrono::{Duration, Utc};
     use std::{env, error::Error};
 
-    pub fn get_exchange_rate(cur1: String, cur2: String) -> Result<(String, String), Box<dyn Error>>{
+    // Returns raw response from the API
+    pub fn get_exchange_rate_raw(
+        cur1: String,
+        cur2: String,
+        yesterday_date: &str,
+    ) -> Result<(String, String), Box<dyn Error>> {
         let api_key =
             env::var("CURRENCY_API_KEY").expect("CURRENCY_API_KEY environment variable not set");
-
-        let yesterday = Utc::now() - Duration::days(1);
 
         let url_today = format!(
             "https://free.currconv.com/api/v7/convert?q={}_{}&compact=ultra&apiKey={}",
@@ -72,24 +78,60 @@ mod query_currency_api {
 
         let url_yesterday = format!(
             "https://free.currconv.com/api/v7/convert?q={}_{}&compact=ultra&date={}&apiKey={}",
-            cur1,
-            cur2,
-            yesterday.format("%Y-%m-%e"),
-            api_key,
+            cur1, cur2, yesterday_date, api_key,
         );
 
         let resp_today = reqwest::blocking::get(url_today)?.text()?;
-        // println!("{:#?}", resp_today);
-
         let resp_yesterday = reqwest::blocking::get(url_yesterday)?.text()?;
-        // println!("{:#?}", resp_yesterday);
 
-        return Ok((resp_today, resp_yesterday))
+        return Ok((resp_today, resp_yesterday));
     }
 }
 
+// TODO this should return box dyn error.
+// That way all unwraps can be changed for ?
 pub fn run_app() {
     // let (cur1, cur2) = user_input_processing::get_valid_currency_codes();
     // query_currency_api::get_exchange_rate(cur1, cur2);
-    query_currency_api::get_exchange_rate("USD".to_string(), "CHF".to_string());
+
+    let yesterday = chrono::Utc::now() - chrono::Duration::days(1);
+    let yesterday_formatted = yesterday.format("%Y-%m-%e").to_string();
+
+    // TODO don't unwrap
+    let exchange_rates_raw = query_currency_api::get_exchange_rate_raw(
+        "USD".to_string(),
+        "CHF".to_string(),
+        &yesterday_formatted,
+    )
+    .unwrap();
+
+    // Convert the raw strings into hashmaps
+    let today_price_map: HashMap<String, Value> =
+        serde_json::from_str(&exchange_rates_raw.0).expect("JSON was not well-formatted");
+    let yesterday_price_map: HashMap<String, Value> =
+        serde_json::from_str(&exchange_rates_raw.1).expect("JSON was not well-formatted");
+
+    // Get the numerical values of the exchange rates
+    let today_price = today_price_map.get("USD_CHF").unwrap().to_string();
+    let yesterday_price = yesterday_price_map
+        .get("USD_CHF")
+        .unwrap()
+        .get(&yesterday_formatted)
+        .unwrap()
+        .to_string();
+
+    println!("tooday: {} .. ystdy: {}", today_price, yesterday_price);
+
+    // Convert the string values to floats
+    let today_price = today_price.parse::<f32>().unwrap();
+    let yesterday_price = yesterday_price.parse::<f32>().unwrap();
+
+    // Compare today's price against yesterday price, print colored output accordingly
+    match today_price.partial_cmp(&yesterday_price) {
+        Some(Ordering::Less) => println!("{}", today_price.to_string().red()),
+        Some(Ordering::Greater) => println!("{}", today_price.to_string().green()),
+        Some(Ordering::Equal) => println!("{}", today_price),
+        // TODO error out
+        None => println!("error"),
+    }
 }
