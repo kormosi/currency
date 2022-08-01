@@ -1,5 +1,3 @@
-use colored::Colorize;
-use std::cmp::Ordering;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
@@ -58,7 +56,9 @@ mod user_input_processing {
 }
 
 mod price_operations {
+    use colored::Colorize;
     use serde_json::{self, Value};
+    use std::cmp::Ordering;
     use std::collections::HashMap;
     use std::{env, error::Error};
 
@@ -113,6 +113,17 @@ mod price_operations {
 
         (today_price, yesterday_price)
     }
+
+    pub fn print_colored_prices(today_price: f32, yesterday_price: f32) {
+        // Compare today's price against yesterday price, print colored output accordingly
+        match today_price.partial_cmp(&yesterday_price) {
+            Some(Ordering::Less) => println!("{}", today_price.to_string().red()),
+            Some(Ordering::Greater) => println!("{}", today_price.to_string().green()),
+            Some(Ordering::Equal) => println!("{}", today_price),
+            // TODO error out
+            None => println!("error"),
+        }
+    }
 }
 
 // TODO this should return box dyn error.
@@ -138,12 +149,5 @@ pub fn run_app() {
 
     println!("today: {} .. yesterday: {}", today_price, yesterday_price);
 
-    // Compare today's price against yesterday price, print colored output accordingly
-    match today_price.partial_cmp(&yesterday_price) {
-        Some(Ordering::Less) => println!("{}", today_price.to_string().red()),
-        Some(Ordering::Greater) => println!("{}", today_price.to_string().green()),
-        Some(Ordering::Equal) => println!("{}", today_price),
-        // TODO error out
-        None => println!("error"),
-    }
+    price_operations::print_colored_prices(today_price, yesterday_price);
 }
