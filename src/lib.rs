@@ -126,15 +126,57 @@ mod price_operations {
     }
 }
 
+mod sql_operations {
+    use colored::Colorize;
+    use rusqlite::Connection;
+
+    pub fn get_history_from_db() {
+        #[derive(Debug)]
+        struct Record {
+            cur1: String,
+            cur2: String,
+            rate: f32,
+            color: String,
+        }
+
+        let conn = Connection::open("db.sqlite3").unwrap();
+        let mut stmt = conn
+            .prepare("SELECT cur1, cur2, rate, color FROM history")
+            .unwrap();
+
+        let history_iter = stmt
+            .query_map([], |row| {
+                Ok(Record {
+                    cur1: row.get(0)?,
+                    cur2: row.get(1)?,
+                    rate: row.get(2)?,
+                    color: row.get(3)?,
+                })
+            })
+            .unwrap();
+
+        for rec in history_iter {
+            let color_from_db = rec.as_ref().unwrap().color.as_str();
+            let rate_from_db = rec.as_ref().unwrap().rate.to_string();
+
+            match color_from_db {
+                "red" => println!("{}", rate_from_db.red()),
+                "green" => println!("{}", rate_from_db.green()),
+                _ => println!("{}", rate_from_db),
+            }
+        }
+    }
+}
+
 // TODO this should return box dyn error.
 // That way all unwraps can be changed for ?
 pub fn run_app() {
-    // let (cur1, cur2) = user_input_processing::get_valid_currency_codes();
+    let (cur1, cur2) = user_input_processing::get_valid_currency_codes();
     // query_currency_api::get_exchange_rate(cur1, cur2);
 
     // Get yesterday's date
     let yesterday = chrono::Utc::now() - chrono::Duration::days(1);
-    let yesterday_formatted = yesterday.format("%Y-%m-%e").to_string();
+    let yesterday_formatted = yesterday.format("%Y-%m-%d").to_string();
 
     // TODO don't unwrap
     let exchange_rates_raw = price_operations::get_exchange_rate_raw(
@@ -148,6 +190,5 @@ pub fn run_app() {
         price_operations::get_prices_from_api_response(exchange_rates_raw, &yesterday_formatted);
 
     println!("today: {} .. yesterday: {}", today_price, yesterday_price);
-
     price_operations::print_colored_prices(today_price, yesterday_price);
 }
