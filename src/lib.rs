@@ -1,7 +1,10 @@
+use std::cmp::Ordering;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::process;
 
+use colored::Colorize;
+use rusqlite::Connection;
 use user_input_processing::is_input_valid_currency_pair;
 
 fn construct_currency_vector() -> Vec<String> {
@@ -73,7 +76,7 @@ mod price_operations {
             &yesterday_date,
         );
 
-        println!("today: {} .. yesterday: {}", today_price, yesterday_price);
+        // println!("today: {} .. yesterday: {}", today_price, yesterday_price);
         compare_and_print_exchange_rate(today_price, yesterday_price);
     }
 
@@ -195,19 +198,69 @@ mod sql_operations {
 // TODO this should return box dyn error.
 // That way all unwraps can be changed for ?
 pub fn run_app() {
+    // TODO construct currency vector before running the code
+    // - now it is constructed every time user inputs a currency pair
+
     loop {
         let user_input = user_input_processing::get_user_input();
         if user_input == "h" {
             sql_operations::get_history_from_db()
         } else if user_input == "q" {
             process::exit(0);
-        } else if let Some(currency_tuple) =
-            is_input_valid_currency_pair(&user_input.to_uppercase())
+        } else if let Some(currency_pair) = is_input_valid_currency_pair(&user_input.to_uppercase())
         {
             // Get yesterday's date and format it
-            let yesterday = chrono::Utc::now() - chrono::Duration::days(1);
-            let yesterday_formatted = yesterday.format("%Y-%m-%d").to_string();
-            price_operations::print_exchange_rate(currency_tuple, yesterday_formatted);
+            let yesterday_date = chrono::Utc::now() - chrono::Duration::days(1);
+            let yesterday_date_formatted = yesterday_date.format("%Y-%m-%d").to_string();
+
+            let exchange_rates_raw = price_operations::get_exchange_rate_raw(
+                &currency_pair.0,
+                &currency_pair.1,
+                &yesterday_date_formatted,
+            )
+            .unwrap();
+
+            let (today_price, yesterday_price) = price_operations::get_prices_from_api_response(
+                &currency_pair.0,
+                &currency_pair.1,
+                exchange_rates_raw,
+                &yesterday_date_formatted,
+            );
+
+            let color: String;
+
+            match today_price.partial_cmp(&yesterday_price) {
+                Some(Ordering::Less) => color = "red".to_string(),
+                Some(Ordering::Greater) => color = "green".to_string(),
+                Some(Ordering::Equal) => color = "normal".to_string(),
+                // TODO don't panic
+                None => panic!("error determining color"),
+            }
+
+            println!(
+                "{} {} {} {}",
+                &currency_pair.0, &currency_pair.1, &today_price, &color
+            );
+
+            // insert into db
+            let conn = Connection::open("db.sqlite3").unwrap();
+            let mut stmt = conn
+                .prepare("INSERT INTO history (cur1, cur2, rate, color) VALUES (?1, ?2, ?3, ?4)")
+                .unwrap();
+
+            stmt.execute([
+                &currency_pair.0,
+                &currency_pair.1,
+                &today_price.to_string(),
+                &color,
+            ])
+            .unwrap();
+
+            // println!("today: {} .. yesterday: {}", today_price, yesterday_price);
+            // compare_and_print_exchange_rate(today_price, yesterday_price);
+
+            // Print colored exchange rate
+            // price_operations::print_exchange_rate(currency_tuple, yesterday_formatted);
         }
     }
 }
