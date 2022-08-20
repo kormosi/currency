@@ -7,6 +7,15 @@ use colored::Colorize;
 use rusqlite::Connection;
 use user_input_processing::is_input_valid_currency_pair;
 
+use crate::sql_operations::insert_record_into_db;
+
+pub struct Record {
+    pub currency1: String,
+    pub currency2: String,
+    pub rate: f32,
+    pub color: String,
+}
+
 fn construct_currency_vector() -> Vec<String> {
     let file = File::open("codes_unique_sorted.txt").expect("Error reading file");
     let reader = BufReader::new(file);
@@ -59,11 +68,42 @@ mod user_input_processing {
 }
 
 mod price_operations {
+    use crate::Record;
     use colored::Colorize;
     use serde_json::{self, Value};
     use std::cmp::Ordering;
     use std::collections::HashMap;
     use std::{env, error::Error};
+
+    pub fn get_price_struct(
+        cur1: &str,
+        cur2: &str,
+        yesterday_date_formatted: &str,
+    ) -> Result<(Record), Box<dyn Error>> {
+        let exchange_rates_raw =
+            get_exchange_rate_raw(cur1, cur2, &yesterday_date_formatted).unwrap();
+
+        let (today_price, yesterday_price) =
+            get_prices_from_api_response(cur1, cur2, exchange_rates_raw, &yesterday_date_formatted);
+
+        // Determine color of the price change
+        let color: String;
+
+        match today_price.partial_cmp(&yesterday_price) {
+            Some(Ordering::Less) => color = "red".to_string(),
+            Some(Ordering::Greater) => color = "green".to_string(),
+            Some(Ordering::Equal) => color = "normal".to_string(),
+            // TODO don't panic
+            None => panic!("error determining color"),
+        }
+
+        Ok(Record {
+            currency1: cur1.to_string(),
+            currency2: cur2.to_string(),
+            rate: today_price,
+            color: color,
+        })
+    }
 
     pub fn print_exchange_rate(currency_pair: (String, String), yesterday_date: String) {
         let exchange_rates_raw =
@@ -81,7 +121,7 @@ mod price_operations {
     }
 
     // Returns raw response from the API
-    pub fn get_exchange_rate_raw(
+    fn get_exchange_rate_raw(
         cur1: &str,
         cur2: &str,
         yesterday_date: &str,
@@ -154,18 +194,26 @@ mod price_operations {
 }
 
 mod sql_operations {
+    use crate::Record;
     use colored::Colorize;
     use rusqlite::Connection;
 
-    pub fn get_history_from_db() {
-        #[derive(Debug)]
-        struct Record {
-            cur1: String,
-            cur2: String,
-            rate: f32,
-            color: String,
-        }
+    pub fn insert_record_into_db(record: &Record) {
+        let conn = Connection::open("db.sqlite3").unwrap();
+        let mut stmt = conn
+            .prepare("INSERT INTO history (cur1, cur2, rate, color) VALUES (?1, ?2, ?3, ?4)")
+            .unwrap();
 
+        stmt.execute([
+            &record.currency1,
+            &record.currency2,
+            &record.rate.to_string(),
+            &record.color,
+        ])
+        .unwrap();
+    }
+
+    pub fn get_history_from_db() {
         let conn = Connection::open("db.sqlite3").unwrap();
         let mut stmt = conn
             .prepare("SELECT cur1, cur2, rate, color FROM history")
@@ -174,8 +222,8 @@ mod sql_operations {
         let history_iter = stmt
             .query_map([], |row| {
                 Ok(Record {
-                    cur1: row.get(0)?,
-                    cur2: row.get(1)?,
+                    currency1: row.get(0)?,
+                    currency2: row.get(1)?,
                     rate: row.get(2)?,
                     color: row.get(3)?,
                 })
@@ -207,60 +255,28 @@ pub fn run_app() {
             sql_operations::get_history_from_db()
         } else if user_input == "q" {
             process::exit(0);
+            // TODO refactor to struct
         } else if let Some(currency_pair) = is_input_valid_currency_pair(&user_input.to_uppercase())
         {
             // Get yesterday's date and format it
             let yesterday_date = chrono::Utc::now() - chrono::Duration::days(1);
             let yesterday_date_formatted = yesterday_date.format("%Y-%m-%d").to_string();
 
-            let exchange_rates_raw = price_operations::get_exchange_rate_raw(
+            let record = price_operations::get_price_struct(
                 &currency_pair.0,
                 &currency_pair.1,
                 &yesterday_date_formatted,
             )
             .unwrap();
 
-            let (today_price, yesterday_price) = price_operations::get_prices_from_api_response(
-                &currency_pair.0,
-                &currency_pair.1,
-                exchange_rates_raw,
-                &yesterday_date_formatted,
-            );
-
-            let color: String;
-
-            match today_price.partial_cmp(&yesterday_price) {
-                Some(Ordering::Less) => color = "red".to_string(),
-                Some(Ordering::Greater) => color = "green".to_string(),
-                Some(Ordering::Equal) => color = "normal".to_string(),
-                // TODO don't panic
-                None => panic!("error determining color"),
+            match record.color.as_str() {
+                "red" => println!("{}->{}: {}", record.currency1, record.currency2, record.rate.to_string().red()),
+                "green" => println!("{}->{}: {}", record.currency1, record.currency2, record.rate.to_string().green()),
+                _ => println!("{}->{}: {}", record.currency1, record.currency2, record.rate)
             }
 
-            println!(
-                "{} {} {} {}",
-                &currency_pair.0, &currency_pair.1, &today_price, &color
-            );
-
             // insert into db
-            let conn = Connection::open("db.sqlite3").unwrap();
-            let mut stmt = conn
-                .prepare("INSERT INTO history (cur1, cur2, rate, color) VALUES (?1, ?2, ?3, ?4)")
-                .unwrap();
-
-            stmt.execute([
-                &currency_pair.0,
-                &currency_pair.1,
-                &today_price.to_string(),
-                &color,
-            ])
-            .unwrap();
-
-            // println!("today: {} .. yesterday: {}", today_price, yesterday_price);
-            // compare_and_print_exchange_rate(today_price, yesterday_price);
-
-            // Print colored exchange rate
-            // price_operations::print_exchange_rate(currency_tuple, yesterday_formatted);
+            insert_record_into_db(&record);
         }
     }
 }
