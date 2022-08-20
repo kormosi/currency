@@ -1,10 +1,8 @@
-use std::cmp::Ordering;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::process;
 
-use colored::Colorize;
-use rusqlite::Connection;
+use colored::{ColoredString, Colorize};
 use user_input_processing::is_input_valid_currency_pair;
 
 use crate::sql_operations::insert_record_into_db;
@@ -194,9 +192,9 @@ mod price_operations {
 }
 
 mod sql_operations {
-    use crate::Record;
+    use crate::{print_records, Record};
     use colored::Colorize;
-    use rusqlite::Connection;
+    use rusqlite::{Connection, MappedRows};
 
     pub fn insert_record_into_db(record: &Record) {
         let conn = Connection::open("db.sqlite3").unwrap();
@@ -219,7 +217,7 @@ mod sql_operations {
             .prepare("SELECT cur1, cur2, rate, color FROM history")
             .unwrap();
 
-        let history_iter = stmt
+        let records: Vec<_> = stmt
             .query_map([], |row| {
                 Ok(Record {
                     currency1: row.get(0)?,
@@ -228,18 +226,28 @@ mod sql_operations {
                     color: row.get(3)?,
                 })
             })
+            .unwrap()
+            .collect::<Result<_, _>>()
             .unwrap();
 
-        for rec in history_iter {
-            let color_from_db = rec.as_ref().unwrap().color.as_str();
-            let rate_from_db = rec.as_ref().unwrap().rate.to_string();
+        print_records(&records);
+    }
+}
 
-            match color_from_db {
-                "red" => println!("{}", rate_from_db.red()),
-                "green" => println!("{}", rate_from_db.green()),
-                _ => println!("{}", rate_from_db),
-            }
+fn print_records(records: &Vec<Record>) {
+    for rec in records {
+        let color_from_db = rec.color.as_str();
+        let rate_from_db = rec.rate.to_string();
+
+        let colored_rate: ColoredString;
+
+        match color_from_db {
+            "red" => colored_rate = rate_from_db.red(),
+            "green" => colored_rate = rate_from_db.green(),
+            _ => colored_rate = rate_from_db.normal(),
         }
+
+        println!("{}->{}: {}", rec.currency1, rec.currency2, colored_rate)
     }
 }
 
@@ -249,6 +257,7 @@ pub fn run_app() {
     // TODO construct currency vector before running the code
     // - now it is constructed every time user inputs a currency pair
 
+    // Main loop of the program
     loop {
         let user_input = user_input_processing::get_user_input();
         if user_input == "h" {
@@ -269,14 +278,12 @@ pub fn run_app() {
             )
             .unwrap();
 
-            match record.color.as_str() {
-                "red" => println!("{}->{}: {}", record.currency1, record.currency2, record.rate.to_string().red()),
-                "green" => println!("{}->{}: {}", record.currency1, record.currency2, record.rate.to_string().green()),
-                _ => println!("{}->{}: {}", record.currency1, record.currency2, record.rate)
-            }
+            let records = vec![record];
+
+            print_records(&records);
 
             // insert into db
-            insert_record_into_db(&record);
+            insert_record_into_db(records.get(0).unwrap());
         }
     }
 }
