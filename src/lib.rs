@@ -26,15 +26,11 @@ mod user_input_processing {
     use regex::Regex;
     use std::io;
 
-    pub fn get_user_input() -> String {
+    pub fn get_user_input() -> io::Result<String> {
         println!("Enter currency pair. 'h' for history, 'q' to quit:");
         let mut input = String::new();
-
-        io::stdin()
-            .read_line(&mut input)
-            .expect("Couldn't read line");
-
-        input.trim().to_string()
+        io::stdin().read_line(&mut input)?;
+        Ok(input.trim().to_string())
     }
 
     fn is_input_in_valid_format(user_input: &str) -> Option<(String, String)> {
@@ -45,11 +41,10 @@ mod user_input_processing {
         Some((captures["cur1"].to_string(), captures["cur2"].to_string()))
     }
 
-    pub fn is_input_valid_currency_pair(user_input: &str) -> Option<(String, String)> {
-        // Vector of all valid currency codes
-        // TODO should be constructed only once
-        let currency_vector = crate::construct_currency_vector();
-
+    pub fn is_input_valid_currency_pair(
+        user_input: &str,
+        currency_vector: &Vec<String>,
+    ) -> Option<(String, String)> {
         if let Some(currency_pair) = is_input_in_valid_format(user_input) {
             if !currency_vector.contains(&currency_pair.0)
                 || !currency_vector.contains(&currency_pair.1)
@@ -251,39 +246,69 @@ fn print_records(records: &Vec<Record>) {
     }
 }
 
+fn get_yesterday_date_formatted() -> String {
+    let yesterday_date = chrono::Utc::now() - chrono::Duration::days(1);
+    yesterday_date.format("%Y-%m-%d").to_string()
+}
+
 // TODO this should return box dyn error.
 // That way all unwraps can be changed for ?
 pub fn run_app() {
-    // TODO construct currency vector before running the code
-    // - now it is constructed every time user inputs a currency pair
+    // Vector of all valid currency codes
+    let currency_vector = construct_currency_vector();
 
     // Main loop of the program
     loop {
         let user_input = user_input_processing::get_user_input();
-        if user_input == "h" {
-            sql_operations::get_history_from_db()
-        } else if user_input == "q" {
-            process::exit(0);
-            // TODO refactor to struct
-        } else if let Some(currency_pair) = is_input_valid_currency_pair(&user_input.to_uppercase())
-        {
-            // Get yesterday's date and format it
-            let yesterday_date = chrono::Utc::now() - chrono::Duration::days(1);
-            let yesterday_date_formatted = yesterday_date.format("%Y-%m-%d").to_string();
 
-            let record = price_operations::get_price_struct(
-                &currency_pair.0,
-                &currency_pair.1,
-                &yesterday_date_formatted,
-            )
-            .unwrap();
+        match user_input {
+            Ok(valid_input) => match valid_input.as_str() {
+                "h" => sql_operations::get_history_from_db(),
+                "q" => process::exit(0),
+                other => {
+                    if let Some(currency_pair) =
+                        is_input_valid_currency_pair(other, &currency_vector)
+                    {
+                        let record = price_operations::get_price_struct(
+                            &currency_pair.0,
+                            &currency_pair.1,
+                            &get_yesterday_date_formatted(),
+                        )
+                        .unwrap();
 
-            let records = vec![record];
-
-            print_records(&records);
-
-            // insert into db
-            insert_record_into_db(records.get(0).unwrap());
+                        //     let records = vec![record];
+                        //     print_records(&records);
+                        //     // insert into db
+                        //     insert_record_into_db(records.get(0).unwrap());
+                    }
+                }
+            },
+            Err(err) => {
+                println!("{}", err);
+            }
         }
+
+        // if user_input == "h" {
+        //     sql_operations::get_history_from_db()
+        // } else if user_input == "q" {
+        //     process::exit(0);
+        //     // TODO refactor to struct
+        // } else if let Some(currency_pair) =
+        //     is_input_valid_currency_pair(&user_input.to_uppercase(), &currency_vector)
+        // {
+        //     let record = price_operations::get_price_struct(
+        //         &currency_pair.0,
+        //         &currency_pair.1,
+        //         &get_yesterday_date_formatted(),
+        //     )
+        //     .unwrap();
+
+        //     let records = vec![record];
+
+        //     print_records(&records);
+
+        //     // insert into db
+        //     insert_record_into_db(records.get(0).unwrap());
     }
+    // }
 }
